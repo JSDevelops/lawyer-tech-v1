@@ -1,0 +1,51 @@
+version: '3.9'
+
+services:
+  # ===== PostgreSQL Database =====
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: lawyertech_db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: lawyertech_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ===== FastAPI Backend =====
+  backend:
+    build: ./backend
+    container_name: lawyertech_api
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:password@postgres:5432/lawyertech_db
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ===== Next.js Frontend =====
+  frontend:
+    build: ./frontend
+    container_name: lawyertech_web
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
