@@ -1505,9 +1505,15 @@ export default function SuperAdminPage() {
       {/* MODAL: ADD TENANT */}
       {showTenantModal && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <form onSubmit={handleCreateTenant} className="card w-full max-w-md space-y-4">
+          <form 
+            onSubmit={handleCreateTenant} 
+            className="card w-full max-w-2xl space-y-4 max-h-[90vh] overflow-y-auto"
+          >
             <div className="flex justify-between items-center pb-2 border-b border-white/5">
-              <h3 className="text-lg font-bold text-white">ลงทะเบียนสำนักงานใหม่</h3>
+              <div className="flex items-center gap-2">
+                <Building className="w-5 h-5 text-indigo-400" />
+                <h3 className="text-lg font-bold text-white">ลงทะเบียนสำนักงานกฎหมายใหม่</h3>
+              </div>
               <button 
                 type="button" 
                 onClick={() => setShowTenantModal(false)}
@@ -1517,47 +1523,174 @@ export default function SuperAdminPage() {
               </button>
             </div>
 
-            <div className="space-y-3">
-              <div className="space-y-1">
-                <label className="text-xs text-slate-400">ชื่อสำนักงานกฎหมาย *</label>
-                <input
-                  type="text"
-                  className="input-field"
-                  placeholder="เช่น สำนักงานสิริมงคลการค้า"
-                  value={newTenant.name}
-                  onChange={e => setNewTenant({ ...newTenant, name: e.target.value })}
-                  required
-                />
-              </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              {/* Left Column: Office Details */}
+              <div className="space-y-3.5">
+                <div className="flex items-center gap-1.5 pb-1 border-b border-white/5">
+                  <Building className="w-4 h-4 text-slate-400" />
+                  <span className="text-xs font-semibold text-slate-300 uppercase tracking-wider">รายละเอียดสำนักงาน (Office)</span>
+                </div>
 
-              <div className="space-y-1">
-                <label className="text-xs text-slate-400">ซับโดเมน *</label>
-                <div className="flex items-center bg-dark-bg border border-dark-border rounded-xl px-3 py-1.5 focus-within:ring-2 focus-within:ring-indigo-500/50">
+                <div className="space-y-1">
+                  <label className="text-xs text-slate-400">ชื่อสำนักงานกฎหมาย *</label>
                   <input
                     type="text"
-                    className="bg-transparent border-0 outline-none text-white text-sm flex-1"
-                    placeholder="sirimongkol"
-                    value={newTenant.subdomain}
-                    onChange={e => setNewTenant({ ...newTenant, subdomain: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '') })}
+                    className="input-field"
+                    placeholder="เช่น สำนักงาน ทวีศักดิ์แอนด์พาร์ทเนอร์"
+                    value={newTenant.name}
+                    onChange={e => setNewTenant({ ...newTenant, name: e.target.value })}
                     required
                   />
-                  <span className="text-xs text-slate-500 font-medium">.lawyertech.co.th</span>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs text-slate-400">ซับโดเมนเข้าใช้งาน *</label>
+                  <div className="flex items-center bg-dark-bg border border-dark-border rounded-xl px-3 py-1.5 focus-within:ring-2 focus-within:ring-indigo-500/50">
+                    <input
+                      type="text"
+                      className="bg-transparent border-0 outline-none text-white text-sm flex-1"
+                      placeholder="taweesak"
+                      value={newTenant.subdomain}
+                      onChange={e => setNewTenant({ ...newTenant, subdomain: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '') })}
+                      required
+                    />
+                    <span className="text-xs text-slate-500 font-medium">.lawyertech.co.th</span>
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs text-slate-400">แพ็กเกจสมาชิกเริ่มต้น *</label>
+                  <select
+                    className="input-field"
+                    value={newTenant.plan_id}
+                    onChange={e => setNewTenant({ ...newTenant, plan_id: e.target.value })}
+                    required
+                  >
+                    <option value="">เลือกแพ็กเกจสมาชิก</option>
+                    {plans.map(p => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} ({p.price.toLocaleString()} ฿/เดือน)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs text-slate-400 block">รอบบิลชำระเงิน *</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className={`flex items-center justify-center gap-2 p-2.5 rounded-xl border cursor-pointer transition-all ${newTenant.billing_cycle === 'monthly' ? 'bg-indigo-500/10 border-indigo-500 text-white' : 'border-white/5 bg-white/[0.02] text-slate-400 hover:bg-white/5'}`}>
+                      <input
+                        type="radio"
+                        name="billing_cycle"
+                        value="monthly"
+                        checked={newTenant.billing_cycle === 'monthly'}
+                        onChange={() => setNewTenant({ ...newTenant, billing_cycle: 'monthly' })}
+                        className="sr-only"
+                      />
+                      <span className="text-xs font-semibold">รายเดือน (Monthly)</span>
+                    </label>
+                    <label className={`flex items-center justify-center gap-2 p-2.5 rounded-xl border cursor-pointer transition-all ${newTenant.billing_cycle === 'yearly' ? 'bg-indigo-500/10 border-indigo-500 text-white' : 'border-white/5 bg-white/[0.02] text-slate-400 hover:bg-white/5'}`}>
+                      <input
+                        type="radio"
+                        name="billing_cycle"
+                        value="yearly"
+                        checked={newTenant.billing_cycle === 'yearly'}
+                        onChange={() => setNewTenant({ ...newTenant, billing_cycle: 'yearly' })}
+                        className="sr-only"
+                      />
+                      <span className="text-xs font-semibold">รายปี (Yearly)</span>
+                    </label>
+                  </div>
                 </div>
               </div>
 
-              <div className="space-y-1">
-                <label className="text-xs text-slate-400">แพ็กเกจสมาชิกเริ่มต้น</label>
-                <select
-                  className="input-field"
-                  value={newTenant.plan_id}
-                  onChange={e => setNewTenant({ ...newTenant, plan_id: e.target.value })}
-                >
-                  <option value="">เลือกแพ็กเกจสมาชิก</option>
-                  {plans.map(p => (
-                    <option key={p.id} value={p.id}>{p.name} ({p.price.toLocaleString()} ฿/เดือน)</option>
-                  ))}
-                </select>
+              {/* Right Column: Admin details */}
+              <div className="space-y-3.5">
+                <div className="flex items-center gap-1.5 pb-1 border-b border-white/5">
+                  <Shield className="w-4 h-4 text-slate-400" />
+                  <span className="text-xs font-semibold text-slate-300 uppercase tracking-wider">ผู้ดูแลระบบหลัก (Super Administrator)</span>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs text-slate-400">ชื่อ-นามสกุล *</label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      className="input-field"
+                      placeholder="เช่น ทนายสมศักดิ์ รักความยุติธรรม"
+                      value={newTenant.admin_full_name}
+                      onChange={e => setNewTenant({ ...newTenant, admin_full_name: e.target.value })}
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs text-slate-400">อีเมลเข้าสู่ระบบ *</label>
+                  <div className="relative">
+                    <input
+                      type="email"
+                      className="input-field"
+                      placeholder="admin@domain.com"
+                      value={newTenant.admin_email}
+                      onChange={e => setNewTenant({ ...newTenant, admin_email: e.target.value })}
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs text-slate-400">รหัสผ่านเริ่มต้น *</label>
+                  <div className="relative">
+                    <input
+                      type="password"
+                      className="input-field"
+                      placeholder="อย่างน้อย 6 ตัวอักษร"
+                      value={newTenant.admin_password}
+                      onChange={e => setNewTenant({ ...newTenant, admin_password: e.target.value })}
+                      minLength={6}
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs text-slate-400">เบอร์โทรศัพท์ติดต่อ</label>
+                  <div className="relative">
+                    <input
+                      type="tel"
+                      className="input-field"
+                      placeholder="เช่น 0891234567"
+                      value={newTenant.admin_phone}
+                      onChange={e => setNewTenant({ ...newTenant, admin_phone: e.target.value })}
+                    />
+                  </div>
+                </div>
               </div>
+
+              {/* Price summary block if plan is selected */}
+              {newTenant.plan_id && (
+                <div className="col-span-1 md:col-span-2 p-4 bg-indigo-500/5 border border-indigo-500/20 rounded-2xl flex items-center justify-between text-xs">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse" />
+                      <span className="text-slate-400 font-medium">สรุปค่าบริการเริ่มต้นของสำนักงานใหม่:</span>
+                    </div>
+                    <div className="text-sm font-bold text-white ml-3.5">
+                      {plans.find(p => p.id === newTenant.plan_id)?.name} — {newTenant.billing_cycle === 'yearly' ? 'รอบบิลรายปี (ใช้งาน 365 วัน)' : 'รอบบิลรายเดือน (ใช้งาน 30 วัน)'}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-slate-400 block font-medium">ยอดชำระเงินที่บันทึกเข้าระบบ:</span>
+                    <span className="text-xl font-black text-indigo-400">
+                      {newTenant.billing_cycle === 'yearly'
+                        ? `${(plans.find(p => p.id === newTenant.plan_id)?.price_yearly || 0).toLocaleString()} ฿`
+                        : `${(plans.find(p => p.id === newTenant.plan_id)?.price || 0).toLocaleString()} ฿`
+                      }
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex justify-end gap-3 pt-3 border-t border-white/5">
@@ -1574,7 +1707,7 @@ export default function SuperAdminPage() {
                 disabled={loading}
               >
                 {loading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                สร้างบัญชีสำนักงาน
+                ลงทะเบียนและเปิดใช้งานระบบ
               </button>
             </div>
           </form>

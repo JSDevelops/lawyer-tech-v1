@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { Bot, Send, Loader2, Search, FileText, FilePlus2, Tag, Upload } from 'lucide-react'
 import toast from 'react-hot-toast'
 
-const API = process.env.NEXT_PUBLIC_API_URL
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1'
 
 const tabs = [
   { id: 'chat', label: 'AI Chat', icon: Bot },
