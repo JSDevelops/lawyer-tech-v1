@@ -24,7 +24,16 @@ router = APIRouter()
 
 # UPLOAD_DIR
 UPLOAD_DIR = "uploads"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+try:
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+except Exception:
+    # Ephemeral fallback for serverless deployment on Vercel
+    UPLOAD_DIR = "/tmp/uploads"
+    try:
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
+    except Exception:
+        pass
+
 
 # Helper function to get Gemini LLM
 def get_llm():

@@ -1,0 +1,5 @@
+Vercel CLI 49.2.0
+Fetching deployment "lawyer-tech-backend.vercel.app" in jsdevelopth-2022s-projects
+Displaying runtime logs for deployment lawyer-tech-backend-b6mje8bh3-jsdevelopth-2022s-projects.vercel.app (dpl_6FEC7yrSVWVvkBTTpFs2bFz9qers) starting from Jun Mo 17:35:25.81
+
+waiting for new logs...

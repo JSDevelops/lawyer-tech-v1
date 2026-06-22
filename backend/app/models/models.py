@@ -491,3 +491,30 @@ class TenantSubscription(Base):
     tenant = relationship("Tenant")
     plan = relationship("SubscriptionPlan")
 
+
+class SystemSetting(Base):
+    """การตั้งค่าระบบส่วนกลาง (SaaS Global Settings)"""
+    __tablename__ = "system_settings"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    smtp_host = Column(String(255), default="smtp.gmail.com")
+    smtp_port = Column(Integer, default=587)
+    smtp_user = Column(String(255), default="noreply@lawyertech.co.th")
+    smtp_password = Column(String(255), default="••••••••")
+    gemini_api_key_override = Column(String(255), default="")
+    maintenance_mode = Column(Boolean, default=False)
+    allow_new_registrations = Column(Boolean, default=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class SystemAuditLog(Base):
+    """บันทึกประวัติการทำงานของระบบหลังบ้าน (SaaS Audit Logs)"""
+    __tablename__ = "system_audit_logs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    action = Column(String(255), nullable=False)
+    details = Column(Text)
+    performed_by_email = Column(String(255))
+    ip_address = Column(String(50), default="127.0.0.1")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+

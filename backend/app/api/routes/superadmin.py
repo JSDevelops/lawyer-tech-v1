@@ -7,7 +7,16 @@ import uuid
 
 from app.core.database import get_db
 from app.core.security import get_current_user
-from app.models.models import User, Case, Tenant, SubscriptionPlan, TenantSubscription, UserRole
+from app.models.models import User, Case, Tenant, SubscriptionPlan, TenantSubscription, UserRole, SystemSetting, SystemAuditLog
+
+async def log_action(db: AsyncSession, action: str, details: str, email: str):
+    log = SystemAuditLog(
+        action=action,
+        details=details,
+        performed_by_email=email
+    )
+    db.add(log)
+    await db.flush()
 
 router = APIRouter()
 
@@ -157,6 +166,7 @@ async def create_tenant(req: TenantCreateRequest, db: AsyncSession = Depends(get
         except ValueError:
             pass
             
+    await log_action(db, "CREATE_TENANT", f"Created tenant '{tenant.name}' with subdomain '{tenant.subdomain}'", current_user["email"])
     return {"status": "success", "tenant_id": str(tenant.id), "message": f"สร้าง Tenant: {tenant.name} สำเร็จ"}
 
 @router.put("/tenants/{tenant_id}/status")
@@ -173,6 +183,7 @@ async def update_tenant_status(tenant_id: str, req: TenantStatusUpdateRequest, d
         raise HTTPException(status_code=404, detail="ไม่พบ Tenant")
         
     tenant.status = req.status
+    await log_action(db, "UPDATE_TENANT_STATUS", f"Changed tenant '{tenant.name}' status to '{req.status}'", current_user["email"])
     return {"status": "success", "message": f"เปลี่ยนสถานะ Tenant เป็น {req.status} สำเร็จ"}
 
 # ==============================
@@ -210,6 +221,7 @@ async def create_plan(req: PlanCreateRequest, db: AsyncSession = Depends(get_db)
     )
     db.add(plan)
     await db.flush()
+    await log_action(db, "CREATE_PLAN", f"Created subscription plan '{plan.name}' for {plan.price} THB/mo", current_user["email"])
     return {"status": "success", "plan_id": str(plan.id), "message": f"สร้างแพ็กเกจ {plan.name} สำเร็จ"}
 
 @router.put("/plans/{plan_id}")
@@ -232,6 +244,7 @@ async def update_plan(plan_id: str, req: PlanCreateRequest, db: AsyncSession = D
     plan.enable_ai = req.enable_ai
     plan.enable_api_access = req.enable_api_access
     
+    await log_action(db, "UPDATE_PLAN", f"Updated subscription plan '{plan.name}' settings", current_user["email"])
     return {"status": "success", "message": "อัปเดตแพ็กเกจสำเร็จ"}
 
 @router.delete("/plans/{plan_id}")
@@ -247,5 +260,138 @@ async def delete_plan(plan_id: str, db: AsyncSession = Depends(get_db), current_
     if not plan:
         raise HTTPException(status_code=404, detail="ไม่พบแพ็กเกจสมาชิก")
         
+    plan_name = plan.name
     await db.delete(plan)
+    await log_action(db, "DELETE_PLAN", f"Deleted subscription plan '{plan_name}'", current_user["email"])
     return {"status": "success", "message": "ลบแพ็กเกจสำเร็จ"}
+
+
+# ==============================
+# New Schemas for SaaS
+# ==============================
+
+class SettingsUpdateRequest(BaseModel):
+    smtp_host: str
+    smtp_port: int
+    smtp_user: str
+    smtp_password: str
+    gemini_api_key_override: Optional[str] = ""
+    maintenance_mode: bool
+    allow_new_registrations: bool
+
+class TenantSubscriptionUpdateRequest(BaseModel):
+    plan_id: str
+
+
+# ==============================
+# Settings Endpoints
+# ==============================
+
+@router.get("/settings")
+async def get_settings(db: AsyncSession = Depends(get_db), current_user=Depends(require_admin)):
+    """ดึงข้อมูลการตั้งค่าระบบส่วนกลาง"""
+    result = await db.execute(select(SystemSetting))
+    setting = result.scalar_one_or_none()
+    if not setting:
+        setting = SystemSetting()
+        db.add(setting)
+        await db.commit()
+        # Refetch
+        result = await db.execute(select(SystemSetting))
+        setting = result.scalar_one()
+        
+    return {
+        "smtp_host": setting.smtp_host,
+        "smtp_port": setting.smtp_port,
+        "smtp_user": setting.smtp_user,
+        "smtp_password": setting.smtp_password,
+        "gemini_api_key_override": setting.gemini_api_key_override,
+        "maintenance_mode": setting.maintenance_mode,
+        "allow_new_registrations": setting.allow_new_registrations
+    }
+
+@router.put("/settings")
+async def update_settings(req: SettingsUpdateRequest, db: AsyncSession = Depends(get_db), current_user=Depends(require_admin)):
+    """อัปเดตการตั้งค่าระบบส่วนกลาง"""
+    result = await db.execute(select(SystemSetting))
+    setting = result.scalar_one_or_none()
+    if not setting:
+        setting = SystemSetting()
+        db.add(setting)
+    
+    setting.smtp_host = req.smtp_host
+    setting.smtp_port = req.smtp_port
+    setting.smtp_user = req.smtp_user
+    setting.smtp_password = req.smtp_password
+    setting.gemini_api_key_override = req.gemini_api_key_override
+    setting.maintenance_mode = req.maintenance_mode
+    setting.allow_new_registrations = req.allow_new_registrations
+    
+    await log_action(db, "UPDATE_SETTINGS", "Updated global system configurations", current_user["email"])
+    return {"status": "success", "message": "บันทึกการตั้งค่าระบบสำเร็จ"}
+
+
+# ==============================
+# Audit Logs Endpoints
+# ==============================
+
+@router.get("/logs")
+async def get_audit_logs(db: AsyncSession = Depends(get_db), current_user=Depends(require_admin)):
+    """ดึงบันทึกประวัติการทำงานของระบบ"""
+    result = await db.execute(select(SystemAuditLog).order_by(SystemAuditLog.created_at.desc()).limit(100))
+    logs = result.scalars().all()
+    return [
+        {
+            "id": str(log.id),
+            "action": log.action,
+            "details": log.details,
+            "performed_by_email": log.performed_by_email,
+            "ip_address": log.ip_address,
+            "created_at": log.created_at
+        } for log in logs
+    ]
+
+
+# ==============================
+# Tenant Subscription Update
+# ==============================
+
+@router.put("/tenants/{tenant_id}/subscription")
+async def update_tenant_subscription(tenant_id: str, req: TenantSubscriptionUpdateRequest, db: AsyncSession = Depends(get_db), current_user=Depends(require_admin)):
+    """แก้ไขหรือต่ออายุแพ็กเกจสมาชิกของ Tenant ด้วยตนเอง"""
+    try:
+        t_uuid = uuid.UUID(tenant_id)
+        p_uuid = uuid.UUID(req.plan_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="UUID ไม่ถูกต้อง")
+
+    # Verify tenant
+    t_res = await db.execute(select(Tenant).where(Tenant.id == t_uuid))
+    tenant = t_res.scalar_one_or_none()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="ไม่พบข้อมูลสำนักงาน")
+
+    # Verify plan
+    p_res = await db.execute(select(SubscriptionPlan).where(SubscriptionPlan.id == p_uuid))
+    plan = p_res.scalar_one_or_none()
+    if not plan:
+        raise HTTPException(status_code=404, detail="ไม่พบแพ็กเกจสมาชิก")
+
+    # Deactivate current subscriptions
+    await db.execute(
+        update(TenantSubscription)
+        .where(TenantSubscription.tenant_id == t_uuid, TenantSubscription.is_active == True)
+        .values(is_active=False)
+    )
+
+    # Create new subscription
+    sub = TenantSubscription(
+        tenant_id=t_uuid,
+        plan_id=p_uuid,
+        is_active=True
+    )
+    db.add(sub)
+    await db.flush()
+
+    await log_action(db, "UPDATE_TENANT_SUBSCRIPTION", f"Manually assigned plan '{plan.name}' to tenant '{tenant.name}'", current_user["email"])
+    return {"status": "success", "message": f"เปลี่ยนแพ็กเกจสมาชิกให้สำนักงาน {tenant.name} สำเร็จ"}

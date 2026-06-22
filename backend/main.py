@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 import uvicorn
+import os
 
 from app.core.config import settings
 from app.core.database import engine, Base
@@ -33,7 +34,10 @@ async def lifespan(app: FastAPI):
     """Startup and shutdown events"""
     # Startup: Create tables if not exist
     import os
-    os.makedirs("uploads", exist_ok=True)
+    try:
+        os.makedirs("uploads", exist_ok=True)
+    except Exception as e:
+        print(f"Skipping uploads directory creation: {e}")
     from sqlalchemy import text
     from app.models import models
     async with engine.begin() as conn:
@@ -104,7 +108,15 @@ app.add_middleware(
 )
 
 # Serve uploaded files static route
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+if os.path.exists("uploads"):
+    app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+else:
+    try:
+        os.makedirs("/tmp/uploads", exist_ok=True)
+        app.mount("/uploads", StaticFiles(directory="/tmp/uploads"), name="uploads")
+        print("Mounted static uploads using /tmp/uploads")
+    except Exception as e:
+        print(f"Failed to mount static uploads directory: {e}")
 
 # ==============================
 # API Routes Registration

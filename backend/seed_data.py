@@ -5,7 +5,8 @@ from app.core.database import Base, engine, AsyncSessionLocal
 from app.core.security import hash_password
 from app.models.models import (
     User, UserRole, Client, Case, CaseCategory, CaseStatus,
-    CalendarEvent, EventType, Invoice, InvoiceStatus
+    CalendarEvent, EventType, Invoice, InvoiceStatus,
+    SubscriptionPlan, Tenant, TenantSubscription
 )
 
 async def seed():
@@ -15,6 +16,78 @@ async def seed():
     print("✅ Database tables created/verified")
 
     async with AsyncSessionLocal() as session:
+        # Seed Subscription Plans
+        result = await session.execute(select(SubscriptionPlan))
+        existing_plans = result.scalars().all()
+        if not existing_plans:
+            plans_data = [
+                SubscriptionPlan(
+                    name="Standard Plan",
+                    price=1990.0,
+                    max_users=10,
+                    storage_limit_gb=10.0,
+                    enable_ai=True,
+                    enable_api_access=False
+                ),
+                SubscriptionPlan(
+                    name="Premium Plan",
+                    price=4990.0,
+                    max_users=999,
+                    storage_limit_gb=100.0,
+                    enable_ai=True,
+                    enable_api_access=True
+                )
+            ]
+            for p in plans_data:
+                session.add(p)
+            await session.flush()
+            print("🌱 2 Subscription Plans seeded")
+        else:
+            print("✨ Subscription Plans already exist")
+
+        # Fetch standard plan
+        result = await session.execute(select(SubscriptionPlan).where(SubscriptionPlan.name == "Standard Plan"))
+        standard_plan = result.scalar_one_or_none()
+        if not standard_plan:
+            result = await session.execute(select(SubscriptionPlan))
+            plans = result.scalars().all()
+            if plans:
+                standard_plan = plans[0]
+            else:
+                standard_plan = SubscriptionPlan(
+                    name="Standard Plan",
+                    price=1990.0,
+                    max_users=10,
+                    storage_limit_gb=10.0,
+                    enable_ai=True,
+                    enable_api_access=False
+                )
+                session.add(standard_plan)
+                await session.flush()
+
+        # Seed default Tenant
+        result = await session.execute(select(Tenant).where(Tenant.subdomain == "demo"))
+        tenant = result.scalar_one_or_none()
+        if not tenant:
+            tenant = Tenant(
+                name="สำนักงานกฎหมาย เลเยอร์ เทค (สาขาหลัก)",
+                subdomain="demo",
+                status="active"
+            )
+            session.add(tenant)
+            await session.flush()
+
+            # Subscribe tenant to Standard Plan
+            sub = TenantSubscription(
+                tenant_id=tenant.id,
+                plan_id=standard_plan.id,
+                is_active=True
+            )
+            session.add(sub)
+            await session.flush()
+            print("🌱 Default Tenant 'demo' seeded with Standard Plan")
+        else:
+            print("✨ Default Tenant 'demo' already exists")
         # Check if admin user already exists
         result = await session.execute(select(User).where(User.email == "admin@lawyertech.co.th"))
         admin = result.scalar_one_or_none()
@@ -26,13 +99,32 @@ async def seed():
                 phone="0812345678",
                 role=UserRole.ADMIN,
                 bar_number="12345/2560",
-                specializations=["คดีอาญา", "คดีแพ่ง", "จัดการมรดก"]
+                specializations=["คดีอาญา", "คดีแพ่ง", "จัดการมรดก"],
+                tenant_id=tenant.id
             )
             session.add(admin)
             await session.flush()
             print("🌱 Admin user seeded (admin@lawyertech.co.th / password123)")
         else:
-            print("✨ Admin user already exists")
+            # Update existing admin to link to tenant if not set
+            if not admin.tenant_id:
+                admin.tenant_id = tenant.id
+                await session.flush()
+                print("🌱 Linked existing Admin user to Tenant 'demo'")
+            else:
+                print("✨ Admin user already exists and is linked to tenant")
+
+            # Link all other untenanted users to default tenant
+            u_result = await session.execute(select(User))
+            all_users = u_result.scalars().all()
+            linked_users = 0
+            for u in all_users:
+                if not u.tenant_id:
+                    u.tenant_id = tenant.id
+                    linked_users += 1
+            if linked_users > 0:
+                await session.flush()
+                print(f"🌱 Linked {linked_users} existing untenanted users to Tenant 'demo'")
 
         # Seed Clients
         result = await session.execute(select(Client))
@@ -111,7 +203,8 @@ async def seed():
                     court_case_number="พ.123/2568",
                     court_date=date.today() + timedelta(days=1),
                     opened_at=date.today() - timedelta(days=19),
-                    client_id=clients["นายสมชาย ใจดี"].id
+                    client_id=clients["นายสมชาย ใจดี"].id,
+                    tenant_id=tenant.id
                 ),
                 Case(
                     case_number="CAS-68002",
@@ -124,7 +217,8 @@ async def seed():
                     court_case_number="พ.456/2568",
                     court_date=date.today() + timedelta(days=30),
                     opened_at=date.today() - timedelta(days=15),
-                    client_id=clients["นางสมหญิง รักดี"].id
+                    client_id=clients["นางสมหญิง รักดี"].id,
+                    tenant_id=tenant.id
                 ),
                 Case(
                     case_number="CAS-68003",
@@ -137,7 +231,8 @@ async def seed():
                     court_case_number="พ.789/2568",
                     court_date=date.today() + timedelta(days=5),
                     opened_at=date.today() - timedelta(days=10),
-                    client_id=clients["นายประชา มั่นคง"].id
+                    client_id=clients["นายประชา มั่นคง"].id,
+                    tenant_id=tenant.id
                 ),
                 Case(
                     case_number="CAS-68004",
@@ -150,7 +245,8 @@ async def seed():
                     court_case_number="อ.987/2568",
                     court_date=date.today() + timedelta(days=3),
                     opened_at=date.today() - timedelta(days=5),
-                    client_id=clients["นางสาวสุดา สวยงาม"].id
+                    client_id=clients["นางสาวสุดา สวยงาม"].id,
+                    tenant_id=tenant.id
                 )
             ]
             for c in cases_data:
@@ -158,7 +254,17 @@ async def seed():
             await session.flush()
             print("🌱 4 Cases seeded")
         else:
-            print("✨ Cases already exist")
+            # Update existing cases to link to default tenant if not set
+            linked_cases = 0
+            for c in existing_cases:
+                if not c.tenant_id:
+                    c.tenant_id = tenant.id
+                    linked_cases += 1
+            if linked_cases > 0:
+                await session.flush()
+                print(f"🌱 Linked {linked_cases} existing untenanted cases to Tenant 'demo'")
+            else:
+                print("✨ Cases already exist and are linked to tenant")
 
         # Re-fetch cases to link events
         result = await session.execute(select(Case))

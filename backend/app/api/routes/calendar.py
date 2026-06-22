@@ -1,5 +1,6 @@
 """Calendar Routes — Full CRUD, Court Dates, Deadlines, Appointments"""
 
+# pyrefly: ignore [missing-import]
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
 from typing import Optional, List

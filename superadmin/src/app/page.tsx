@@ -45,7 +45,7 @@ interface SystemStats {
 
 export default function SuperAdminPage() {
   const [isLoggedIn, setIsLoggedIn] = useState(false)
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'tenants' | 'plans'>('dashboard')
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'tenants' | 'plans' | 'billing' | 'settings' | 'logs'>('dashboard')
   const [loading, setLoading] = useState(false)
   const [pageLoading, setPageLoading] = useState(false)
 
@@ -66,6 +66,20 @@ export default function SuperAdminPage() {
   const [tenants, setTenants] = useState<Tenant[]>([])
   const [plans, setPlans] = useState<Plan[]>([])
 
+  // System Settings State
+  const [sysSettings, setSysSettings] = useState({
+    smtp_host: '',
+    smtp_port: 587,
+    smtp_user: '',
+    smtp_password: '',
+    gemini_api_key_override: '',
+    maintenance_mode: false,
+    allow_new_registrations: true
+  })
+
+  // Audit Logs State
+  const [auditLogs, setAuditLogs] = useState<any[]>([])
+
   // Modal / Form States
   const [showTenantModal, setShowTenantModal] = useState(false)
   const [newTenant, setNewTenant] = useState({ name: '', subdomain: '', plan_id: '' })
@@ -80,6 +94,11 @@ export default function SuperAdminPage() {
     enable_ai: false,
     enable_api_access: false
   })
+
+  // Subscription Edit States
+  const [showSubscriptionModal, setShowSubscriptionModal] = useState(false)
+  const [subSelectedTenant, setSubSelectedTenant] = useState<Tenant | null>(null)
+  const [subPlanId, setSubPlanId] = useState('')
 
   // Get Auth Headers
   const getHeaders = () => {
@@ -127,10 +146,76 @@ export default function SuperAdminPage() {
         const plansData = await plansRes.json()
         setPlans(plansData)
       }
+
+      // Fetch Global SaaS Settings
+      const settingsRes = await fetch(`${API}/superadmin/settings`, { headers: getHeaders() })
+      if (settingsRes.ok) {
+        const settingsData = await settingsRes.json()
+        setSysSettings(settingsData)
+      }
+
+      // Fetch Audit Logs
+      const logsRes = await fetch(`${API}/superadmin/logs`, { headers: getHeaders() })
+      if (logsRes.ok) {
+        const logsData = await logsRes.json()
+        setAuditLogs(logsData)
+      }
     } catch {
       toast.error('ไม่สามารถโหลดข้อมูลระบบได้')
     } finally {
       setPageLoading(false)
+    }
+  }
+
+  // Handle Save Global Settings
+  const handleSaveSettings = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setLoading(true)
+    try {
+      const res = await fetch(`${API}/superadmin/settings`, {
+        method: 'PUT',
+        headers: getHeaders(),
+        body: JSON.stringify(sysSettings)
+      })
+      if (res.ok) {
+        toast.success('บันทึกการตั้งค่าระบบส่วนกลางสำเร็จ')
+        loadData()
+      } else {
+        const err = await res.json()
+        toast.error(err.detail || 'เกิดข้อผิดพลาดในการบันทึก')
+      }
+    } catch {
+      toast.error('เชื่อมต่อเซิร์ฟเวอร์ล้มเหลว')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Handle Manual Tenant Subscription Plan Assignment
+  const handleUpdateTenantSubscription = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!subSelectedTenant || !subPlanId) return
+    setLoading(true)
+    try {
+      const res = await fetch(`${API}/superadmin/tenants/${subSelectedTenant.id}/subscription`, {
+        method: 'PUT',
+        headers: getHeaders(),
+        body: JSON.stringify({ plan_id: subPlanId })
+      })
+      if (res.ok) {
+        toast.success(`เปลี่ยนแผนสมาชิกให้ ${subSelectedTenant.name} สำเร็จ`)
+        setShowSubscriptionModal(false)
+        setSubSelectedTenant(null)
+        setSubPlanId('')
+        loadData()
+      } else {
+        const err = await res.json()
+        toast.error(err.detail || 'เกิดข้อผิดพลาด')
+      }
+    } catch {
+      toast.error('เชื่อมต่อเซิร์ฟเวอร์ล้มเหลว')
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -413,6 +498,27 @@ export default function SuperAdminPage() {
               <Layers className="w-4 h-4" />
               จัดการแพ็กเกจ (Plans)
             </button>
+            <button
+              onClick={() => setActiveTab('billing')}
+              className={`sidebar-link w-full text-left ${activeTab === 'billing' ? 'active' : ''}`}
+            >
+              <CreditCard className="w-4 h-4" />
+              จัดการธุรกรรม & แผนสมาชิก
+            </button>
+            <button
+              onClick={() => setActiveTab('settings')}
+              className={`sidebar-link w-full text-left ${activeTab === 'settings' ? 'active' : ''}`}
+            >
+              <Settings className="w-4 h-4" />
+              ตั้งค่าระบบส่วนกลาง
+            </button>
+            <button
+              onClick={() => setActiveTab('logs')}
+              className={`sidebar-link w-full text-left ${activeTab === 'logs' ? 'active' : ''}`}
+            >
+              <Activity className="w-4 h-4" />
+              ประวัติการใช้งานระบบ (Logs)
+            </button>
           </nav>
         </div>
 
@@ -437,6 +543,9 @@ export default function SuperAdminPage() {
             {activeTab === 'dashboard' && 'แดชบอร์ดกลางการควบคุม'}
             {activeTab === 'tenants' && 'จัดการสำนักงานทนายความ'}
             {activeTab === 'plans' && 'จัดการแพ็กเกจสมาชิกและโควตา'}
+            {activeTab === 'billing' && 'จัดการธุรกรรมและการต่ออายุสมาชิก'}
+            {activeTab === 'settings' && 'การตั้งค่าระบบส่วนกลาง (Global Config)'}
+            {activeTab === 'logs' && 'ประวัติกิจกรรมการทำงานของระบบ (Audit Logs)'}
           </h2>
           <button 
             onClick={loadData}
@@ -716,6 +825,254 @@ export default function SuperAdminPage() {
               </div>
             </div>
           )}
+
+          {/* VIEW: BILLING & SUBSCRIPTIONS */}
+          {activeTab === 'billing' && (
+            <div className="space-y-4 animate-fade-in">
+              <div className="flex justify-between items-center">
+                <p className="text-xs text-slate-400">ควบคุมสิทธิ์และตรวจสอบการต่ออายุแผนสมาชิกของสำนักงานทนายความ</p>
+              </div>
+
+              <div className="card overflow-x-auto p-0">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>ชื่อสำนักงาน</th>
+                      <th>ซับโดเมน</th>
+                      <th>แพ็กเกจปัจจุบัน</th>
+                      <th>ราคา/เดือน</th>
+                      <th>ผู้ใช้งาน</th>
+                      <th>สถานะ</th>
+                      <th>จัดการสิทธิ์</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tenants.map(t => (
+                      <tr key={t.id}>
+                        <td className="font-semibold text-white">{t.name}</td>
+                        <td>
+                          <code className="text-xs bg-indigo-500/10 px-2 py-0.5 rounded text-indigo-300 border border-indigo-500/20">
+                            {t.subdomain}
+                          </code>
+                        </td>
+                        <td>
+                          <span className="font-medium text-slate-200">{t.plan_name}</span>
+                        </td>
+                        <td className="text-indigo-400 font-semibold">{t.plan_price.toLocaleString()} ฿</td>
+                        <td>{t.user_count} คน</td>
+                        <td>
+                          <span className={`badge ${t.status === 'active' ? 'badge-active' : 'badge-suspended'}`}>
+                            {t.status === 'active' ? 'กำลังใช้งาน' : 'ระงับบริการ'}
+                          </span>
+                        </td>
+                        <td>
+                          <button
+                            onClick={() => {
+                              setSubSelectedTenant(t)
+                              const matchedPlan = plans.find(p => p.name === t.plan_name)
+                              setSubPlanId(matchedPlan ? matchedPlan.id : '')
+                              setShowSubscriptionModal(true)
+                            }}
+                            className="btn-secondary py-1 px-2.5 text-xs flex items-center gap-1 hover:border-indigo-500/40 hover:text-white"
+                          >
+                            <Edit className="w-3.5 h-3.5" />
+                            ปรับเปลี่ยนแผน
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {tenants.length === 0 && (
+                      <tr>
+                        <td colSpan={7} className="text-center py-6 text-slate-500 italic">
+                          ยังไม่มีข้อมูลสำนักงานในระบบ
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* VIEW: GLOBAL SaaS CONFIG */}
+          {activeTab === 'settings' && (
+            <form onSubmit={handleSaveSettings} className="space-y-6 animate-fade-in max-w-4xl">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                
+                {/* SMTP configuration */}
+                <div className="card space-y-4">
+                  <h3 className="text-sm font-semibold text-white flex items-center gap-2 border-b border-white/5 pb-2">
+                    <Settings className="w-4 h-4 text-indigo-400" />
+                    การตั้งค่าเมลเซิร์ฟเวอร์ระบบ (SMTP)
+                  </h3>
+                  <div className="space-y-3">
+                    <div className="space-y-1">
+                      <label className="text-xs text-slate-400">SMTP Host</label>
+                      <input
+                        type="text"
+                        className="input-field"
+                        value={sysSettings.smtp_host}
+                        onChange={e => setSysSettings({ ...sysSettings, smtp_host: e.target.value })}
+                        placeholder="smtp.gmail.com"
+                        required
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs text-slate-400">SMTP Port</label>
+                      <input
+                        type="number"
+                        className="input-field"
+                        value={sysSettings.smtp_port}
+                        onChange={e => setSysSettings({ ...sysSettings, smtp_port: parseInt(e.target.value) || 587 })}
+                        placeholder="587"
+                        required
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs text-slate-400">SMTP User / Email</label>
+                      <input
+                        type="email"
+                        className="input-field"
+                        value={sysSettings.smtp_user}
+                        onChange={e => setSysSettings({ ...sysSettings, smtp_user: e.target.value })}
+                        placeholder="noreply@lawyertech.co.th"
+                        required
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs text-slate-400">SMTP Password</label>
+                      <input
+                        type="password"
+                        className="input-field"
+                        value={sysSettings.smtp_password}
+                        onChange={e => setSysSettings({ ...sysSettings, smtp_password: e.target.value })}
+                        placeholder="••••••••"
+                        required
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* AI and Global Policies */}
+                <div className="card space-y-4 flex flex-col justify-between">
+                  <div className="space-y-4">
+                    <h3 className="text-sm font-semibold text-white flex items-center gap-2 border-b border-white/5 pb-2">
+                      <Sparkles className="w-4 h-4 text-indigo-400" />
+                      ขุมพลัง AI & นโยบายระบบ
+                    </h3>
+                    <div className="space-y-3">
+                      <div className="space-y-1">
+                        <label className="text-xs text-slate-400">Gemini API Key (Override)</label>
+                        <input
+                          type="password"
+                          className="input-field"
+                          value={sysSettings.gemini_api_key_override}
+                          onChange={e => setSysSettings({ ...sysSettings, gemini_api_key_override: e.target.value })}
+                          placeholder="เว้นว่างไว้เพื่อใช้คีย์เริ่มต้นของเซิร์ฟเวอร์"
+                        />
+                      </div>
+                      
+                      <div className="pt-2 space-y-3">
+                        <div className="flex justify-between items-center">
+                          <div>
+                            <p className="text-xs font-semibold text-white">โหมดปิดปรับปรุงระบบชั่วคราว</p>
+                            <p className="text-[10px] text-slate-500">บล็อกผู้ใช้นอกเหนือจาก SuperAdmin</p>
+                          </div>
+                          <input
+                            type="checkbox"
+                            className="rounded text-indigo-600 bg-slate-800 border-slate-600"
+                            checked={sysSettings.maintenance_mode}
+                            onChange={e => setSysSettings({ ...sysSettings, maintenance_mode: e.target.checked })}
+                          />
+                        </div>
+
+                        <div className="flex justify-between items-center">
+                          <div>
+                            <p className="text-xs font-semibold text-white">เปิดรับการลงทะเบียนสำนักงานใหม่</p>
+                            <p className="text-[10px] text-slate-500">อนุญาตให้สมัครบริการ ERP ทนายความทางหน้าเว็บบริการ</p>
+                          </div>
+                          <input
+                            type="checkbox"
+                            className="rounded text-indigo-600 bg-slate-800 border-slate-600"
+                            checked={sysSettings.allow_new_registrations}
+                            onChange={e => setSysSettings({ ...sysSettings, allow_new_registrations: e.target.checked })}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="btn-primary w-full py-2.5 mt-4 flex items-center justify-center gap-2"
+                  >
+                    {loading && <Loader2 className="w-4 h-4 animate-spin" />}
+                    บันทึกการตั้งค่าทั้งหมด
+                  </button>
+                </div>
+
+              </div>
+            </form>
+          )}
+
+          {/* VIEW: AUDIT LOGS */}
+          {activeTab === 'logs' && (
+            <div className="space-y-4 animate-fade-in">
+              <div className="flex justify-between items-center">
+                <p className="text-xs text-slate-400">ประวัติการปฏิบัติงานย้อนหลังของผู้ดูแลระบบและระบบหลังบ้าน</p>
+              </div>
+
+              <div className="card p-0 overflow-hidden border border-white/5">
+                <div className="max-h-[600px] overflow-y-auto">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>เหตุการณ์ (Action)</th>
+                        <th>รายละเอียด</th>
+                        <th>ดำเนินการโดย</th>
+                        <th>IP Address</th>
+                        <th>วัน-เวลา</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {auditLogs.map(log => (
+                        <tr key={log.id} className="hover:bg-white/[0.02]">
+                          <td>
+                            <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded border
+                              ${log.action.includes('CREATE') ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : ''}
+                              ${log.action.includes('UPDATE') ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20' : ''}
+                              ${log.action.includes('DELETE') ? 'bg-red-500/10 text-red-400 border-red-500/20' : ''}
+                              ${!log.action.includes('CREATE') && !log.action.includes('UPDATE') && !log.action.includes('DELETE') ? 'bg-slate-500/10 text-slate-400 border-slate-500/20' : ''}
+                            `}>
+                              {log.action}
+                            </span>
+                          </td>
+                          <td className="text-slate-300 text-xs">{log.details}</td>
+                          <td className="text-slate-400 text-xs">{log.performed_by_email}</td>
+                          <td>
+                            <code className="text-[10px] bg-white/5 px-1.5 py-0.5 rounded text-slate-400">
+                              {log.ip_address}
+                            </code>
+                          </td>
+                          <td className="text-slate-500 text-[11px]">
+                            {new Date(log.created_at).toLocaleString('th-TH')}
+                          </td>
+                        </tr>
+                      ))}
+                      {auditLogs.length === 0 && (
+                        <tr>
+                          <td colSpan={5} className="text-center py-8 text-slate-500 italic text-xs">
+                            ยังไม่มีประวัติกิจกรรมบันทึกในระบบหลังบ้านขณะนี้
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
         </main>
       </div>
 
@@ -907,6 +1264,73 @@ export default function SuperAdminPage() {
               >
                 {loading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
                 บันทึกแพ็กเกจ
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+      {/* MODAL: MANUAL SUBSCRIPTION ADJUSTMENT */}
+      {showSubscriptionModal && subSelectedTenant && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+          <form onSubmit={handleUpdateTenantSubscription} className="card w-full max-w-md space-y-4">
+            <div className="flex justify-between items-center pb-2 border-b border-white/5">
+              <h3 className="text-lg font-bold text-white">ปรับเปลี่ยนแผนสมาชิกสำนักงาน</h3>
+              <button 
+                type="button" 
+                onClick={() => {
+                  setShowSubscriptionModal(false)
+                  setSubSelectedTenant(null)
+                }}
+                className="text-slate-500 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div className="p-3 bg-white/5 rounded-xl border border-white/5 text-xs space-y-1">
+                <p className="text-slate-400">สำนักงานทนายความ:</p>
+                <p className="text-sm font-semibold text-white">{subSelectedTenant.name}</p>
+                <p className="text-slate-500 mt-1">ซับโดเมน: {subSelectedTenant.subdomain}</p>
+                <p className="text-slate-500">แผนปัจจุบัน: {subSelectedTenant.plan_name}</p>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs text-slate-400 block">เลือกแผนสมาชิกใหม่</label>
+                <select
+                  className="input-field"
+                  value={subPlanId}
+                  onChange={e => setSubPlanId(e.target.value)}
+                  required
+                >
+                  <option value="">-- เลือกแผนสมาชิก --</option>
+                  {plans.map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} ({p.price.toLocaleString()} ฿/เดือน)
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-3 border-t border-white/5">
+              <button 
+                type="button" 
+                onClick={() => {
+                  setShowSubscriptionModal(false)
+                  setSubSelectedTenant(null)
+                }}
+                className="btn-secondary text-xs"
+              >
+                ยกเลิก
+              </button>
+              <button 
+                type="submit" 
+                className="btn-primary text-xs flex items-center gap-1.5"
+                disabled={loading}
+              >
+                {loading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                บันทึกการเปลี่ยนแผน
               </button>
             </div>
           </form>
