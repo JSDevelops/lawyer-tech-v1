@@ -7,7 +7,9 @@ import uuid
 
 from app.core.database import get_db
 from app.core.security import get_current_user
-from app.models.models import User, Case, Tenant, SubscriptionPlan, TenantSubscription, UserRole, SystemSetting, SystemAuditLog
+from app.models.models import User, Case, Tenant, SubscriptionPlan, TenantSubscription, UserRole, SystemSetting, SystemAuditLog, SaaSTransaction
+from app.core.email import send_invoice_email
+from datetime import datetime, timedelta
 
 async def log_action(db: AsyncSession, action: str, details: str, email: str):
     log = SystemAuditLog(
@@ -399,7 +401,6 @@ async def update_tenant_subscription(tenant_id: str, req: TenantSubscriptionUpda
     )
 
     # Create new subscription
-    from datetime import datetime, timedelta
     price_paid = plan.price if req.billing_cycle == "monthly" else plan.price_yearly
     end_date = None
     if req.billing_cycle == "monthly":
@@ -418,5 +419,238 @@ async def update_tenant_subscription(tenant_id: str, req: TenantSubscriptionUpda
     db.add(sub)
     await db.flush()
 
+    # Create SaaS Transaction record
+    invoice_num = f"INV-SAAS-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+    tx = SaaSTransaction(
+        invoice_number=invoice_num,
+        tenant_id=t_uuid,
+        plan_id=p_uuid,
+        amount=price_paid,
+        billing_cycle=req.billing_cycle,
+        payment_status="paid",
+        payment_method="manual_override",
+        payment_date=datetime.now()
+    )
+    db.add(tx)
+    await db.flush()
+
+    # Log action
     await log_action(db, "UPDATE_TENANT_SUBSCRIPTION", f"Manually assigned plan '{plan.name}' ({req.billing_cycle}) to tenant '{tenant.name}'", current_user["email"])
-    return {"status": "success", "message": f"เปลี่ยนแพ็กเกจสมาชิกให้สำนักงาน {tenant.name} สำเร็จ"}
+
+    # Find tenant admin email to send invoice/receipt notification
+    admin_res = await db.execute(
+        select(User.email).where(User.tenant_id == t_uuid, User.role == UserRole.ADMIN)
+    )
+    admin_email = admin_res.scalar_one_or_none()
+    
+    # If no admin, default to the oldest registered user of the tenant
+    if not admin_email:
+        user_res = await db.execute(
+            select(User.email).where(User.tenant_id == t_uuid).order_by(User.created_at.asc())
+        )
+        admin_email = user_res.scalars().first()
+
+    email_sent = False
+    if admin_email:
+        try:
+            email_sent = await send_invoice_email(
+                db=db,
+                recipient_email=admin_email,
+                tenant_name=tenant.name,
+                plan_name=plan.name,
+                amount=price_paid,
+                billing_cycle=req.billing_cycle,
+                end_date=end_date,
+                invoice_number=invoice_num
+            )
+        except Exception as email_err:
+            print(f"Error sending automatic subscription email: {email_err}")
+
+    return {
+        "status": "success", 
+        "message": f"เปลี่ยนแพ็กเกจสมาชิกให้สำนักงาน {tenant.name} สำเร็จ",
+        "invoice_number": invoice_num,
+        "email_sent": email_sent
+    }
+
+
+# ==============================
+# SaaS Billing Transactions
+# ==============================
+
+class SaaSTransactionCreateRequest(BaseModel):
+    tenant_id: str
+    plan_id: str
+    amount: float
+    billing_cycle: str # monthly, yearly
+    payment_status: str # paid, pending, failed
+    payment_method: str # bank_transfer, credit_card, manual_override
+
+@router.get("/transactions")
+async def get_saas_transactions(db: AsyncSession = Depends(get_db), current_user=Depends(require_admin)):
+    """ดึงข้อมูลรายการธุรกรรมการชำระเงินค่าแพ็กเกจทั้งหมด"""
+    result = await db.execute(
+        select(SaaSTransaction, Tenant.name, Tenant.subdomain, SubscriptionPlan.name)
+        .join(Tenant, SaaSTransaction.tenant_id == Tenant.id)
+        .join(SubscriptionPlan, SaaSTransaction.plan_id == SubscriptionPlan.id)
+        .order_by(SaaSTransaction.created_at.desc())
+    )
+    
+    tx_list = []
+    for row in result.all():
+        tx, t_name, t_subdomain, p_name = row
+        tx_list.append({
+            "id": str(tx.id),
+            "invoice_number": tx.invoice_number,
+            "tenant_name": t_name,
+            "tenant_subdomain": t_subdomain,
+            "plan_name": p_name,
+            "amount": tx.amount,
+            "billing_cycle": tx.billing_cycle,
+            "payment_status": tx.payment_status,
+            "payment_method": tx.payment_method,
+            "payment_date": tx.payment_date.isoformat() if tx.payment_date else None,
+            "created_at": tx.created_at.isoformat() if tx.created_at else None
+        })
+    return tx_list
+
+@router.post("/transactions")
+async def create_saas_transaction(req: SaaSTransactionCreateRequest, db: AsyncSession = Depends(get_db), current_user=Depends(require_admin)):
+    """บันทึกธุรกรรมการชำระเงินใหม่ด้วยมือ (Manual Transaction Record)"""
+    try:
+        t_uuid = uuid.UUID(req.tenant_id)
+        p_uuid = uuid.UUID(req.plan_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="UUID ไม่ถูกต้อง")
+
+    # Verify tenant
+    t_res = await db.execute(select(Tenant).where(Tenant.id == t_uuid))
+    tenant = t_res.scalar_one_or_none()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="ไม่พบข้อมูลสำนักงาน")
+
+    # Verify plan
+    p_res = await db.execute(select(SubscriptionPlan).where(SubscriptionPlan.id == p_uuid))
+    plan = p_res.scalar_one_or_none()
+    if not plan:
+        raise HTTPException(status_code=404, detail="ไม่พบแพ็กเกจสมาชิก")
+
+    invoice_num = f"INV-SAAS-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+    tx = SaaSTransaction(
+        invoice_number=invoice_num,
+        tenant_id=t_uuid,
+        plan_id=p_uuid,
+        amount=req.amount,
+        billing_cycle=req.billing_cycle,
+        payment_status=req.payment_status,
+        payment_method=req.payment_method,
+        payment_date=datetime.now()
+    )
+    db.add(tx)
+    await db.flush()
+
+    # Log action
+    await log_action(db, "CREATE_SAAS_TRANSACTION", f"Manually recorded transaction '{invoice_num}' for tenant '{tenant.name}'", current_user["email"])
+
+    # Attempt to send email if status is paid
+    email_sent = False
+    if req.payment_status == "paid":
+        # Find tenant admin email
+        admin_res = await db.execute(
+            select(User.email).where(User.tenant_id == t_uuid, User.role == UserRole.ADMIN)
+        )
+        admin_email = admin_res.scalar_one_or_none()
+        
+        if not admin_email:
+            user_res = await db.execute(
+                select(User.email).where(User.tenant_id == t_uuid).order_by(User.created_at.asc())
+            )
+            admin_email = user_res.scalars().first()
+
+        if admin_email:
+            # Check end_date of active sub
+            sub_res = await db.execute(
+                select(TenantSubscription.end_date)
+                .where(TenantSubscription.tenant_id == t_uuid, TenantSubscription.plan_id == p_uuid, TenantSubscription.is_active == True)
+            )
+            end_date = sub_res.scalar_one_or_none()
+            
+            try:
+                email_sent = await send_invoice_email(
+                    db=db,
+                    recipient_email=admin_email,
+                    tenant_name=tenant.name,
+                    plan_name=plan.name,
+                    amount=req.amount,
+                    billing_cycle=req.billing_cycle,
+                    end_date=end_date,
+                    invoice_number=invoice_num
+                )
+            except Exception as e:
+                print(f"Error sending manual transaction email: {e}")
+
+    return {
+        "status": "success", 
+        "message": f"บันทึกธุรกรรม {invoice_num} สำเร็จ",
+        "invoice_number": invoice_num,
+        "email_sent": email_sent
+    }
+
+@router.post("/transactions/{tx_id}/resend-email")
+async def resend_transaction_email(tx_id: str, db: AsyncSession = Depends(get_db), current_user=Depends(require_admin)):
+    """ส่งอีเมลใบแจ้งหนี้/ยืนยันการทำธุรกรรมอีกครั้ง"""
+    try:
+        tx_uuid = uuid.UUID(tx_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="UUID ไม่ถูกต้อง")
+
+    # Fetch transaction with details
+    res = await db.execute(
+        select(SaaSTransaction, Tenant, SubscriptionPlan)
+        .join(Tenant, SaaSTransaction.tenant_id == Tenant.id)
+        .join(SubscriptionPlan, SaaSTransaction.plan_id == SubscriptionPlan.id)
+        .where(SaaSTransaction.id == tx_uuid)
+    )
+    row = res.first()
+    if not row:
+        raise HTTPException(status_code=404, detail="ไม่พบข้อมูลธุรกรรม")
+
+    tx, tenant, plan = row
+
+    # Find tenant admin email
+    admin_res = await db.execute(
+        select(User.email).where(User.tenant_id == tenant.id, User.role == UserRole.ADMIN)
+    )
+    admin_email = admin_res.scalar_one_or_none()
+    
+    if not admin_email:
+        user_res = await db.execute(
+            select(User.email).where(User.tenant_id == tenant.id).order_by(User.created_at.asc())
+        )
+        admin_email = user_res.scalars().first()
+
+    if not admin_email:
+        raise HTTPException(status_code=404, detail="ไม่พบอีเมลผู้ใช้งานในสำนักงานสำหรับส่งการแจ้งเตือน")
+
+    # Get active subscription to see current end_date
+    sub_res = await db.execute(
+        select(TenantSubscription.end_date)
+        .where(TenantSubscription.tenant_id == tenant.id, TenantSubscription.plan_id == plan.id, TenantSubscription.is_active == True)
+    )
+    end_date = sub_res.scalar_one_or_none()
+
+    email_sent = await send_invoice_email(
+        db=db,
+        recipient_email=admin_email,
+        tenant_name=tenant.name,
+        plan_name=plan.name,
+        amount=tx.amount,
+        billing_cycle=tx.billing_cycle,
+        end_date=end_date,
+        invoice_number=tx.invoice_number
+    )
+
+    if not email_sent:
+        raise HTTPException(status_code=500, detail="ไม่สามารถส่งอีเมลได้ กรุณาตรวจสอบการตั้งค่าเมลเซิร์ฟเวอร์ระบบ (SMTP) ในการตั้งค่า")
+
+    return {"status": "success", "message": f"ส่งอีเมลใบเสร็จเลขที่ {tx.invoice_number} ไปยัง {admin_email} สำเร็จ"}

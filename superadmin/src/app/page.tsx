@@ -49,9 +49,21 @@ interface SystemStats {
 
 export default function SuperAdminPage() {
   const [isLoggedIn, setIsLoggedIn] = useState(false)
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'tenants' | 'plans' | 'billing' | 'settings' | 'logs'>('dashboard')
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'tenants' | 'plans' | 'billing' | 'transactions' | 'settings' | 'logs'>('dashboard')
   const [loading, setLoading] = useState(false)
   const [pageLoading, setPageLoading] = useState(false)
+
+  // Transaction States
+  const [transactions, setTransactions] = useState<any[]>([])
+  const [showTransactionModal, setShowTransactionModal] = useState(false)
+  const [newTransaction, setNewTransaction] = useState({
+    tenant_id: '',
+    plan_id: '',
+    amount: 0,
+    billing_cycle: 'monthly',
+    payment_status: 'paid',
+    payment_method: 'manual_override'
+  })
 
   // Auth States
   const [email, setEmail] = useState('')
@@ -166,6 +178,17 @@ export default function SuperAdminPage() {
         const logsData = await logsRes.json()
         setAuditLogs(logsData)
       }
+
+      // Fetch SaaS Transactions
+      try {
+        const txRes = await fetch(`${API}/superadmin/transactions`, { headers: getHeaders() })
+        if (txRes.ok) {
+          const txData = await txRes.json()
+          setTransactions(txData)
+        }
+      } catch (e) {
+        console.error("Error loading transactions:", e)
+      }
     } catch {
       toast.error('ไม่สามารถโหลดข้อมูลระบบได้')
     } finally {
@@ -220,6 +243,69 @@ export default function SuperAdminPage() {
       } else {
         const err = await res.json()
         toast.error(err.detail || 'เกิดข้อผิดพลาด')
+      }
+    } catch {
+      toast.error('เชื่อมต่อเซิร์ฟเวอร์ล้มเหลว')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Handle Create SaaS Transaction manually
+  const handleCreateTransaction = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!newTransaction.tenant_id || !newTransaction.plan_id) {
+      toast.error('กรุณาเลือกสำนักงานและแผนสมาชิก')
+      return
+    }
+    setLoading(true)
+    try {
+      const res = await fetch(`${API}/superadmin/transactions`, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify(newTransaction)
+      })
+      if (res.ok) {
+        const data = await res.json()
+        if (data.email_sent) {
+          toast.success(`บันทึกธุรกรรมสำเร็จและส่งอีเมลใบเสร็จแล้ว`)
+        } else {
+          toast.success(`บันทึกธุรกรรมสำเร็จ (ไม่ได้ส่งเมล/ส่งเมลล้มเหลว)`)
+        }
+        setShowTransactionModal(false)
+        setNewTransaction({
+          tenant_id: '',
+          plan_id: '',
+          amount: 0,
+          billing_cycle: 'monthly',
+          payment_status: 'paid',
+          payment_method: 'manual_override'
+        })
+        loadData()
+      } else {
+        const err = await res.json()
+        toast.error(err.detail || 'เกิดข้อผิดพลาดในการบันทึกธุรกรรม')
+      }
+    } catch {
+      toast.error('เชื่อมต่อเซิร์ฟเวอร์ล้มเหลว')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Handle Resend Email
+  const handleResendEmail = async (txId: string) => {
+    setLoading(true)
+    try {
+      const res = await fetch(`${API}/superadmin/transactions/${txId}/resend-email`, {
+        method: 'POST',
+        headers: getHeaders()
+      })
+      if (res.ok) {
+        toast.success('ส่งอีเมลใบเสร็จ/แจ้งหนี้อีกครั้งสำเร็จ')
+      } else {
+        const err = await res.json()
+        toast.error(err.detail || 'ส่งอีเมลล้มเหลว')
       }
     } catch {
       toast.error('เชื่อมต่อเซิร์ฟเวอร์ล้มเหลว')
@@ -514,7 +600,14 @@ export default function SuperAdminPage() {
               className={`sidebar-link w-full text-left ${activeTab === 'billing' ? 'active' : ''}`}
             >
               <CreditCard className="w-4 h-4" />
-              จัดการธุรกรรม & แผนสมาชิก
+              จัดการแผนสมาชิก
+            </button>
+            <button
+              onClick={() => setActiveTab('transactions')}
+              className={`sidebar-link w-full text-left ${activeTab === 'transactions' ? 'active' : ''}`}
+            >
+              <Database className="w-4 h-4" />
+              ประวัติธุรกรรม & ใบเสร็จ
             </button>
             <button
               onClick={() => setActiveTab('settings')}
@@ -555,6 +648,7 @@ export default function SuperAdminPage() {
             {activeTab === 'tenants' && 'จัดการสำนักงานทนายความ'}
             {activeTab === 'plans' && 'จัดการแพ็กเกจสมาชิกและโควตา'}
             {activeTab === 'billing' && 'จัดการธุรกรรมและการต่ออายุสมาชิก'}
+            {activeTab === 'transactions' && 'ประวัติธุรกรรม SaaS & ส่งอีเมลใบเสร็จ'}
             {activeTab === 'settings' && 'การตั้งค่าระบบส่วนกลาง (Global Config)'}
             {activeTab === 'logs' && 'ประวัติกิจกรรมการทำงานของระบบ (Audit Logs)'}
           </h2>
@@ -928,6 +1022,106 @@ export default function SuperAdminPage() {
                       <tr>
                         <td colSpan={7} className="text-center py-6 text-slate-500 italic">
                           ยังไม่มีข้อมูลสำนักงานในระบบ
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* VIEW: SaaS TRANSACTIONS */}
+          {activeTab === 'transactions' && (
+            <div className="space-y-4 animate-fade-in">
+              <div className="flex justify-between items-center">
+                <p className="text-xs text-slate-400">ประวัติการทำธุรกรรมค่าบริการรายเดือน/รายปี และการส่งอีเมลใบเสร็จ</p>
+                <button
+                  onClick={() => {
+                    setNewTransaction({
+                      tenant_id: tenants.length > 0 ? tenants[0].id : '',
+                      plan_id: plans.length > 0 ? plans[0].id : '',
+                      amount: plans.length > 0 ? plans[0].price : 0,
+                      billing_cycle: 'monthly',
+                      payment_status: 'paid',
+                      payment_method: 'manual_override'
+                    })
+                    setShowTransactionModal(true)
+                  }}
+                  className="btn-primary py-2 px-3 text-xs flex items-center gap-1.5"
+                >
+                  <Plus className="w-4 h-4" />
+                  บันทึกธุรกรรมใหม่ (Manual)
+                </button>
+              </div>
+
+              {/* Transactions Table */}
+              <div className="card overflow-x-auto p-0 border border-white/5">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>เลขที่ธุรกรรม</th>
+                      <th>สำนักงาน</th>
+                      <th>แพ็กเกจ</th>
+                      <th>รอบบิล</th>
+                      <th>ยอดชำระ</th>
+                      <th>วิธีชำระเงิน</th>
+                      <th>สถานะ</th>
+                      <th>วันเวลาที่ชำระ</th>
+                      <th>การจัดการ</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {transactions.map(tx => (
+                      <tr key={tx.id} className="hover:bg-white/[0.02]">
+                        <td className="font-mono text-xs text-indigo-300 font-semibold">{tx.invoice_number}</td>
+                        <td>
+                          <div>
+                            <span className="font-semibold text-white block">{tx.tenant_name}</span>
+                            <span className="text-[10px] text-slate-500">{tx.tenant_subdomain}.lawyertech.co.th</span>
+                          </div>
+                        </td>
+                        <td className="text-slate-300 text-xs font-semibold">{tx.plan_name}</td>
+                        <td>
+                          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${tx.billing_cycle === 'yearly' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20'}`}>
+                            {tx.billing_cycle === 'yearly' ? 'รายปี' : 'รายเดือน'}
+                          </span>
+                        </td>
+                        <td className="text-emerald-400 font-bold">{(tx.amount || 0).toLocaleString()} ฿</td>
+                        <td className="text-slate-400 text-xs">
+                          {tx.payment_method === 'bank_transfer' && 'โอนเงินผ่านธนาคาร'}
+                          {tx.payment_method === 'credit_card' && 'บัตรเครดิต'}
+                          {tx.payment_method === 'manual_override' && 'ปรับเปลี่ยนโดยแอดมิน'}
+                        </td>
+                        <td>
+                          <span className={`badge ${
+                            tx.payment_status === 'paid' ? 'badge-active' : 
+                            tx.payment_status === 'pending' ? 'badge-suspended' : 'badge-suspended bg-red-500/10 text-red-400'
+                          }`}>
+                            {tx.payment_status === 'paid' && 'สำเร็จ'}
+                            {tx.payment_status === 'pending' && 'รอตรวจสอบ'}
+                            {tx.payment_status === 'failed' && 'ล้มเหลว'}
+                          </span>
+                        </td>
+                        <td className="text-slate-500 text-xs">
+                          {tx.payment_date ? new Date(tx.payment_date).toLocaleString('th-TH') : 'ไม่ระบุ'}
+                        </td>
+                        <td>
+                          <button
+                            onClick={() => handleResendEmail(tx.id)}
+                            className="btn-secondary py-1 px-2.5 text-xs flex items-center gap-1 hover:border-indigo-500/40 hover:text-white"
+                            disabled={loading}
+                          >
+                            <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                            ส่งอีเมลอีกครั้ง
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {transactions.length === 0 && (
+                      <tr>
+                        <td colSpan={9} className="text-center py-8 text-slate-500 italic text-xs">
+                          ยังไม่มีประวัติรายการทำธุรกรรมใดๆ ในระบบ
                         </td>
                       </tr>
                     )}
@@ -1416,6 +1610,152 @@ export default function SuperAdminPage() {
               >
                 {loading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
                 บันทึกการเปลี่ยนแผน
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* MODAL: RECORD MANUAL TRANSACTION */}
+      {showTransactionModal && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+          <form onSubmit={handleCreateTransaction} className="card w-full max-w-md space-y-4">
+            <div className="flex justify-between items-center pb-2 border-b border-white/5">
+              <h3 className="text-lg font-bold text-white">บันทึกธุรกรรมค่าแพ็กเกจด้วยมือ</h3>
+              <button 
+                type="button" 
+                onClick={() => setShowTransactionModal(false)}
+                className="text-slate-500 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <label className="text-xs text-slate-400">สำนักงานทนายความ *</label>
+                <select
+                  className="input-field"
+                  value={newTransaction.tenant_id}
+                  onChange={e => setNewTransaction({ ...newTransaction, tenant_id: e.target.value })}
+                  required
+                >
+                  <option value="">เลือกสำนักงาน</option>
+                  {tenants.map(t => (
+                    <option key={t.id} value={t.id}>{t.name} ({t.subdomain})</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs text-slate-400">แพ็กเกจสมาชิก *</label>
+                <select
+                  className="input-field"
+                  value={newTransaction.plan_id}
+                  onChange={e => {
+                    const planId = e.target.value
+                    const matchedPlan = plans.find(p => p.id === planId)
+                    const cyclePrice = matchedPlan 
+                      ? (newTransaction.billing_cycle === 'yearly' ? matchedPlan.price_yearly : matchedPlan.price) 
+                      : 0
+                    setNewTransaction({ 
+                      ...newTransaction, 
+                      plan_id: planId,
+                      amount: cyclePrice
+                    })
+                  }}
+                  required
+                >
+                  <option value="">เลือกแพ็กเกจ</option>
+                  {plans.map(p => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs text-slate-400">รอบบิลการใช้งาน</label>
+                  <select
+                    className="input-field"
+                    value={newTransaction.billing_cycle}
+                    onChange={e => {
+                      const cycle = e.target.value
+                      const matchedPlan = plans.find(p => p.id === newTransaction.plan_id)
+                      const cyclePrice = matchedPlan 
+                        ? (cycle === 'yearly' ? matchedPlan.price_yearly : matchedPlan.price) 
+                        : 0
+                      setNewTransaction({ 
+                        ...newTransaction, 
+                        billing_cycle: cycle,
+                        amount: cyclePrice
+                      })
+                    }}
+                    required
+                  >
+                    <option value="monthly">รายเดือน (Monthly)</option>
+                    <option value="yearly">รายปี (Yearly)</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs text-slate-400">ยอดเงินชำระ (บาท) *</label>
+                  <input
+                    type="number"
+                    className="input-field"
+                    value={newTransaction.amount}
+                    onChange={e => setNewTransaction({ ...newTransaction, amount: parseFloat(e.target.value) || 0 })}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs text-slate-400">วิธีการชำระเงิน</label>
+                  <select
+                    className="input-field"
+                    value={newTransaction.payment_method}
+                    onChange={e => setNewTransaction({ ...newTransaction, payment_method: e.target.value })}
+                    required
+                  >
+                    <option value="manual_override">ปรับเปลี่ยนสิทธิ์โดยแอดมิน</option>
+                    <option value="bank_transfer">โอนเงินผ่านบัญชีธนาคาร</option>
+                    <option value="credit_card">ชำระผ่านบัตรเครดิต</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs text-slate-400">สถานะรายการ</label>
+                  <select
+                    className="input-field"
+                    value={newTransaction.payment_status}
+                    onChange={e => setNewTransaction({ ...newTransaction, payment_status: e.target.value })}
+                    required
+                  >
+                    <option value="paid">ชำระเงินแล้วสำเร็จ</option>
+                    <option value="pending">รอตรวจสอบความถูกต้อง</option>
+                    <option value="failed">ชำระเงินไม่สำเร็จ</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-3 border-t border-white/5">
+              <button 
+                type="button" 
+                onClick={() => setShowTransactionModal(false)}
+                className="btn-secondary text-xs"
+              >
+                ยกเลิก
+              </button>
+              <button 
+                type="submit" 
+                className="btn-primary text-xs flex items-center gap-1.5"
+                disabled={loading}
+              >
+                {loading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                บันทึกธุรกรรม & ส่งเมล
               </button>
             </div>
           </form>

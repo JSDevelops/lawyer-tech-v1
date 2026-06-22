@@ -521,3 +521,22 @@ class SystemAuditLog(Base):
     ip_address = Column(String(50), default="127.0.0.1")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+
+class SaaSTransaction(Base):
+    """ประวัติการทำธุรกรรมค่าสมัครสมาชิก SaaS (SaaS Billing Transactions)"""
+    __tablename__ = "saas_transactions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    invoice_number = Column(String(50), unique=True, index=True, nullable=False)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
+    plan_id = Column(UUID(as_uuid=True), ForeignKey("subscription_plans.id"), nullable=False)
+    amount = Column(Float, nullable=False, default=0.0)
+    billing_cycle = Column(String(20), nullable=False, default="monthly") # monthly, yearly
+    payment_status = Column(String(50), nullable=False, default="paid") # paid, pending, failed
+    payment_method = Column(String(50), nullable=False, default="manual_override") # bank_transfer, credit_card, manual_override
+    payment_date = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    tenant = relationship("Tenant")
+    plan = relationship("SubscriptionPlan")
+
