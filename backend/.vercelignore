@@ -7,4 +7,4 @@ __pycache__/
 uploads/
 .pytest_cache/
 .vercel/
-.env*.local
+venv*
