@@ -10,6 +10,10 @@ from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 import uvicorn
 import os
+import sys
+
+# Ensure the backend directory is in the Python search path for Vercel imports
+sys.path.insert(0, os.path.dirname(__file__))
 
 from app.core.config import settings
 from app.core.database import engine, Base
